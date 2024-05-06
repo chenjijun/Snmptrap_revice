@@ -9,13 +9,15 @@ import requests
 import json
 import openpyxl
 
-# 发送文本消息
-
+# 读取EXCEL中的设备信息，用于与trap内的IP地址进行匹配
 wb = openpyxl.load_workbook('wenjian.xlsx')
-allshu = []
+device_values = []
 ws = wb.active
 for value in ws.values:
-    allshu.append(value)
+    device_values.append(value)
+wb.close()
+
+# 发送消息至企业微信机器人
 
 
 def send_text(webhook, content, mentioned_list=None, mentioned_mobile_list=None):
@@ -32,6 +34,8 @@ def send_text(webhook, content, mentioned_list=None, mentioned_mobile_list=None)
     data = json.dumps(data)
     info = requests.post(url=webhook, data=data, headers=header)
 
+# 发送消息至企业微信机器人
+
 
 def send_md(webhook, content, ip, state, erro1):
     header = {
@@ -39,7 +43,6 @@ def send_md(webhook, content, ip, state, erro1):
         "Charset": "UTF-8"
     }
     data = {
-
         "msgtype": "markdown",
         "markdown": {
             "content": "# <font color=\"warning\">" + "{}".format(content) + "</font>" + '\n' +
@@ -54,7 +57,7 @@ def send_md(webhook, content, ip, state, erro1):
 
 
 webhook = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx"
-#在企业微信中创建机器人，获取机器人代码
+# 在企业微信中创建机器人，获取机器人代码
 
 
 def pick(varbind):
@@ -67,74 +70,63 @@ def pick(varbind):
         return False
 
 
-def cbFun(transportDispatcher, transportDomain, transportAddress, wholeMsg):
+def handle_trap(transportDispatcher, transportDomain, transportAddress, wholeMsg):
     # print(wholeMsg)
     while wholeMsg:
         try:
             msgVer = int(api.decodeMessageVersion(wholeMsg))
         except:
             msgVer = 'null'
-
         if msgVer in api.protoModules:
             pMod = api.protoModules[msgVer]
         else:
             print('Unsupported SNMP version %s' % msgVer)
             return
-
         reqMsg, wholeMsg = decoder.decode(wholeMsg, asn1Spec=pMod.Message(), )
-        # print("reqmsg:", reqMsg)
-        # print("wholemsg:",wholeMsg)
         print('Notification message from %s:%s: ' %
               (transportDomain, transportAddress))
-        # print('从{}接收到数据，开始检查'.format(transportAddress))
-        # print(reqMsg)
         reqPDU = pMod.apiMessage.getPDU(reqMsg)
-        # print("pdu:",reqPDU)
         varBinds = pMod.apiPDU.getVarBindList(reqPDU)
-        abc = ''
-        # print("varbinds:",varBinds)
+        mib_oid_value = ''
         for row in varBinds:
             row: VarBind
             row = row.prettyPrint()
             k, v = pick(row)
-            # print("%s:%s" % (k, v))
-            abc += (k + ":" + v + "\n")
-        # print(abc)
-        # print(transportAddress)
+            mib_oid_value += (k + ":" + v + "\n")
         ip = transportAddress[0]  # 提取IP地址
-        alarmst = ''  # 告警判断是否尾6
-        alarmck = re.findall('3.1.12.\d+', abc, re.MULTILINE)  # 获取告警MIB
-        # print(alarmck )
-        if alarmck:
-            if int(alarmck[0].replace('3.1.12:', '')) == 6:
-                alarmst = '告警消除'
+        alarm_state = ''
+        alarm_check = re.findall(
+            '3.1.12.\d+', mib_oid_value, re.MULTILINE)  # 获取告警MIB
+        # print(alarm_check )
+        if alarm_check:
+            if int(alarm_check[0].replace('3.1.12:', '')) == 6:
+                alarm_state = '告警消除'
             else:
-                alarmst = '发生告警'
-        # print(alarmst)
+                alarm_state = '发生告警'
+        # print(alarm_state)
 
-        snhao = ''
-        snhao = re.findall('10.3.1.13:\.+', abc, re.MULTILINE)
-        print(snhao)
-        if snhao:
-            snhao = snhao[0]
-        wyname = 'null'
-        wyip = 'null'
-        for snck in allshu:
-            if snhao in snck:
-                wyname = snck[0]
-                wyip = snck[1]
+        sn_number = ''
+        sn_number = re.findall('10.3.1.13:\.+', mib_oid_value, re.MULTILINE)
+        if sn_number:
+            sn_number = sn_number[0]
+        device_name = 'null'
+        device_ip = 'null'
+        for i in device_values:
+            if sn_number in i:
+                device_name = i[0]
+                device_ip = i[1]
 
-        alarm = (re.findall('\[.+\]', abc))
+        alarm = (re.findall('\[.+\]', mib_oid_value))
         if alarm:
             alarm = alarm[0]
         else:
             alarm = 'null'
         # print(alarm)
-        # send_md(webhook, content='提示', ip=ip, state=alarmst, erro1=alarm)
+        # send_md(webhook, content='提示', ip=ip, state=alarm_state, erro1=alarm)
         shijian = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         send_text(webhook, content=('时间：{}\n网元：{}\nIP地址：{}\n消息类型：{}\n'
-                                    '告警名称：{}'.format(shijian, wyname, wyip, alarmst, alarm)),
+                                    '告警名称：{}'.format(shijian, device_name, device_ip, alarm_state, alarm)),
                   mentioned_mobile_list=None)
     # except Exception as e:
     #     print(e)
@@ -143,7 +135,7 @@ def cbFun(transportDispatcher, transportDomain, transportAddress, wholeMsg):
 
 
 transportDispatcher = AsynsockDispatcher()
-transportDispatcher.registerRecvCbFun(cbFun)
+transportDispatcher.registerRecvCbFun(handle_trap)
 # UDP/IPv4
 transportDispatcher.registerTransport(
     udp.domainName, udp.UdpSocketTransport().openServerMode(('0.0.0.0', 16667))
