@@ -53,7 +53,8 @@ def send_md(webhook, content, ip, state, erro1):
     info = requests.post(url=webhook, data=data, headers=header)
 
 
-webhook = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7e2ec244-952d-4975-824b-e8e9e6d7b840"
+webhook = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx"
+#在企业微信中创建机器人，获取机器人代码
 
 
 def pick(varbind):
